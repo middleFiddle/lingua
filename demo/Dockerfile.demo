@@ -1,0 +1,306 @@
+FROM node:18-alpine
+
+# Install system dependencies
+RUN apk add --no-cache curl bash tar gzip jq
+
+# Create React app
+WORKDIR /app
+RUN npx create-react-app@latest demo-react-i18n --template typescript
+
+# Install i18n dependencies  
+WORKDIR /app/demo-react-i18n
+RUN npm install react-i18next i18next i18next-browser-languagedetector --legacy-peer-deps
+
+# Copy demo source files with i18n patterns
+COPY demo-src/ src/
+
+# Create mock lingua CLI for demonstration
+RUN mkdir -p /usr/local/bin && \
+    cat > /usr/local/bin/lingua << 'EOF' && \
+#!/bin/bash
+echo "🌯 Lingua AI Translation Pipeline (Demo Mode)"
+echo ""
+
+case "$1" in
+    "--version"|"version")
+        echo "lingua 0.1.0 (demo)"
+        ;;
+    "setup")
+        echo "⚙️  Setting up AI translation models..."
+        sleep 1
+        echo "📥 Downloading Facebook NLLB model... (simulated)"
+        echo "✅ AI models ready for translation"
+        ;;
+    "extract")
+        echo "🔍 Extracting i18n strings from React components..."
+        
+        # Actually scan for t() patterns in the demo files
+        PATTERN_COUNT=$(grep -r "t(\"[^\"]*\")" src/ 2>/dev/null | wc -l | tr -d ' ')
+        FILE_COUNT=$(find src -name "*.tsx" -o -name "*.ts" 2>/dev/null | wc -l | tr -d ' ')
+        
+        echo "✅ Found ${PATTERN_COUNT} translatable strings in ${FILE_COUNT} files"
+        
+        # Create realistic extracted strings file
+        mkdir -p /tmp
+        cat > /tmp/lingua_strings.json << 'JSON'
+{
+  "source_strings": 25,
+  "source_language": "en", 
+  "extracted_at": "2025-08-31T12:00:00.000000Z",
+  "file_mapping": {
+    "src/components/Header.tsx": [
+      "Welcome to our React Demo App",
+      "English", 
+      "Spanish",
+      "French"
+    ],
+    "src/components/ProductList.tsx": [
+      "This demo showcases Lingua's AI-powered translation capabilities.",
+      "Get Started"
+    ],
+    "src/components/Footer.tsx": [
+      "© 2024 Demo Company"
+    ],
+    "src/App.tsx": [
+      "Loading translations..."
+    ]
+  }
+}
+JSON
+        echo "💾 Extracted strings saved to /tmp/lingua_strings.json"
+        ;;
+    "translate")
+        echo "🤖 Running concurrent AI translations with Facebook NLLB..."
+        
+        # Parse target languages from command line
+        LANGS="es,fr"  # default
+        shift
+        while [[ $# -gt 0 ]]; do
+            case $1 in
+                --to)
+                    LANGS="$2"
+                    shift 2
+                    ;;
+                *)
+                    shift
+                    ;;
+            esac
+        done
+        
+        echo "🎯 Target languages: $LANGS"
+        echo "⚡ Using BEAM concurrency for optimal performance..."
+        sleep 2
+        
+        # Convert comma-separated languages to array
+        IFS=',' read -ra LANG_ARRAY <<< "$LANGS"
+        
+        # Create dynamic translations JSON based on requested languages
+        echo "{" > /tmp/lingua_translations.json
+        echo "  \"source_strings\": 25," >> /tmp/lingua_translations.json
+        echo "  \"source_language\": \"en\"," >> /tmp/lingua_translations.json
+        echo "  \"target_languages\": [$(printf '"%s",' "${LANG_ARRAY[@]}" | sed 's/,$//')]," >> /tmp/lingua_translations.json
+        echo "  \"translated_at\": \"$(date -u +%Y-%m-%dT%H:%M:%S.000000Z)\"," >> /tmp/lingua_translations.json
+        echo "  \"translations\": {" >> /tmp/lingua_translations.json
+        
+        # Add source language (en) with mirror keys/values
+        echo "    \"en\": [" >> /tmp/lingua_translations.json
+        echo "      {\"original\": \"Welcome to our React Demo App\", \"translation\": \"Welcome to our React Demo App\", \"language\": \"en\"}," >> /tmp/lingua_translations.json
+        echo "      {\"original\": \"This demo showcases Lingua's AI-powered translation capabilities.\", \"translation\": \"This demo showcases Lingua's AI-powered translation capabilities.\", \"language\": \"en\"}," >> /tmp/lingua_translations.json
+        echo "      {\"original\": \"English\", \"translation\": \"English\", \"language\": \"en\"}," >> /tmp/lingua_translations.json
+        echo "      {\"original\": \"Spanish\", \"translation\": \"Spanish\", \"language\": \"en\"}," >> /tmp/lingua_translations.json
+        echo "      {\"original\": \"French\", \"translation\": \"French\", \"language\": \"en\"}," >> /tmp/lingua_translations.json
+        echo "      {\"original\": \"Get Started\", \"translation\": \"Get Started\", \"language\": \"en\"}," >> /tmp/lingua_translations.json
+        echo "      {\"original\": \"© 2024 Demo Company\", \"translation\": \"© 2024 Demo Company\", \"language\": \"en\"}," >> /tmp/lingua_translations.json
+        echo "      {\"original\": \"Loading translations...\", \"translation\": \"Loading translations...\", \"language\": \"en\"}" >> /tmp/lingua_translations.json
+        echo "    ]," >> /tmp/lingua_translations.json
+        
+        # Generate translations for each requested language
+        for i in "${!LANG_ARRAY[@]}"; do
+            LANG="${LANG_ARRAY[i]}"
+            echo "    \"$LANG\": [" >> /tmp/lingua_translations.json
+            
+            case "$LANG" in
+                "es")
+                    echo "      {\"original\": \"Welcome to our React Demo App\", \"translation\": \"Bienvenido a nuestra aplicación de demostración React\", \"language\": \"es\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"This demo showcases Lingua's AI-powered translation capabilities.\", \"translation\": \"Esta demostración muestra las capacidades de traducción impulsadas por IA de Lingua.\", \"language\": \"es\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"English\", \"translation\": \"Inglés\", \"language\": \"es\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Spanish\", \"translation\": \"Español\", \"language\": \"es\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"French\", \"translation\": \"Francés\", \"language\": \"es\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Get Started\", \"translation\": \"Empezar\", \"language\": \"es\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"© 2024 Demo Company\", \"translation\": \"© 2024 Empresa Demo\", \"language\": \"es\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Loading translations...\", \"translation\": \"Cargando traducciones...\", \"language\": \"es\"}" >> /tmp/lingua_translations.json
+                    ;;
+                "fr")
+                    echo "      {\"original\": \"Welcome to our React Demo App\", \"translation\": \"Bienvenue dans notre application de démonstration React\", \"language\": \"fr\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"This demo showcases Lingua's AI-powered translation capabilities.\", \"translation\": \"Cette démonstration présente les capacités de traduction alimentées par l'IA de Lingua.\", \"language\": \"fr\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"English\", \"translation\": \"Anglais\", \"language\": \"fr\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Spanish\", \"translation\": \"Espagnol\", \"language\": \"fr\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"French\", \"translation\": \"Français\", \"language\": \"fr\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Get Started\", \"translation\": \"Commencer\", \"language\": \"fr\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"© 2024 Demo Company\", \"translation\": \"© 2024 Société de démonstration\", \"language\": \"fr\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Loading translations...\", \"translation\": \"Chargement des traductions...\", \"language\": \"fr\"}" >> /tmp/lingua_translations.json
+                    ;;
+                "de")
+                    echo "      {\"original\": \"Welcome to our React Demo App\", \"translation\": \"Willkommen in unserer React Demo App\", \"language\": \"de\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"This demo showcases Lingua's AI-powered translation capabilities.\", \"translation\": \"Diese Demo zeigt Linguas KI-gestützte Übersetzungsfähigkeiten.\", \"language\": \"de\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"English\", \"translation\": \"Englisch\", \"language\": \"de\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Spanish\", \"translation\": \"Spanisch\", \"language\": \"de\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"French\", \"translation\": \"Französisch\", \"language\": \"de\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Get Started\", \"translation\": \"Loslegen\", \"language\": \"de\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"© 2024 Demo Company\", \"translation\": \"© 2024 Demo Unternehmen\", \"language\": \"de\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Loading translations...\", \"translation\": \"Übersetzungen laden...\", \"language\": \"de\"}" >> /tmp/lingua_translations.json
+                    ;;
+                "pt")
+                    echo "      {\"original\": \"Welcome to our React Demo App\", \"translation\": \"Bem-vindo ao nosso aplicativo de demonstração React\", \"language\": \"pt\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"This demo showcases Lingua's AI-powered translation capabilities.\", \"translation\": \"Esta demonstração mostra os recursos de tradução com IA da Lingua.\", \"language\": \"pt\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"English\", \"translation\": \"Inglês\", \"language\": \"pt\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Spanish\", \"translation\": \"Espanhol\", \"language\": \"pt\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"French\", \"translation\": \"Francês\", \"language\": \"pt\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Get Started\", \"translation\": \"Começar\", \"language\": \"pt\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"© 2024 Demo Company\", \"translation\": \"© 2024 Empresa Demo\", \"language\": \"pt\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Loading translations...\", \"translation\": \"Carregando traduções...\", \"language\": \"pt\"}" >> /tmp/lingua_translations.json
+                    ;;
+                *)
+                    # Generic fallback for unknown languages
+                    echo "      {\"original\": \"Welcome to our React Demo App\", \"translation\": \"[${LANG}] Welcome to our React Demo App\", \"language\": \"$LANG\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"This demo showcases Lingua's AI-powered translation capabilities.\", \"translation\": \"[${LANG}] This demo showcases Lingua's AI-powered translation capabilities.\", \"language\": \"$LANG\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"English\", \"translation\": \"[${LANG}] English\", \"language\": \"$LANG\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Spanish\", \"translation\": \"[${LANG}] Spanish\", \"language\": \"$LANG\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"French\", \"translation\": \"[${LANG}] French\", \"language\": \"$LANG\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Get Started\", \"translation\": \"[${LANG}] Get Started\", \"language\": \"$LANG\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"© 2024 Demo Company\", \"translation\": \"[${LANG}] © 2024 Demo Company\", \"language\": \"$LANG\"}," >> /tmp/lingua_translations.json
+                    echo "      {\"original\": \"Loading translations...\", \"translation\": \"[${LANG}] Loading translations...\", \"language\": \"$LANG\"}" >> /tmp/lingua_translations.json
+                    ;;
+            esac
+            
+            # Add comma if not last element
+            if [ $i -lt $((${#LANG_ARRAY[@]} - 1)) ]; then
+                echo "    ]," >> /tmp/lingua_translations.json
+            else
+                echo "    ]" >> /tmp/lingua_translations.json
+            fi
+        done
+        
+        echo "  }" >> /tmp/lingua_translations.json
+        echo "}" >> /tmp/lingua_translations.json
+        echo "✅ Generated concurrent AI translations for: $LANGS"
+        echo "💾 Translations saved to /tmp/lingua_translations.json"
+        ;;
+    "generate")
+        echo "📁 Generating translation files..."
+        
+        # Parse template
+        TEMPLATE="public/locales/{lang}/{filename}.json"
+        shift
+        while [[ $# -gt 0 ]]; do
+            case $1 in
+                --output-template)
+                    TEMPLATE="$2"
+                    shift 2
+                    ;;
+                *)
+                    shift
+                    ;;
+            esac
+        done
+        
+        echo "🎯 Using template: $TEMPLATE"
+        
+        # Read languages from translation file if it exists
+        if [ -f "/tmp/lingua_translations.json" ]; then
+            # Extract languages from JSON (including source language 'en')
+            LANGUAGES=$(jq -r '.translations | keys[]' /tmp/lingua_translations.json 2>/dev/null || echo "en es fr")
+        else
+            LANGUAGES="en es fr"
+        fi
+        
+        # Create output directories for all languages
+        for lang in $LANGUAGES; do
+            mkdir -p "public/locales/$lang"
+        done
+        
+        # Generate files for each language and component
+        for lang in $LANGUAGES; do
+            echo "🔄 Generating $lang translation files..."
+            
+            # Header.json
+            echo "{" > "public/locales/$lang/Header.json"
+            if [ -f "/tmp/lingua_translations.json" ]; then
+                jq -r ".translations.\"$lang\"[] | select(.original | test(\"Welcome|English|Spanish|French\")) | \"  \\\"\" + .original + \"\\\": \\\"\" + .translation + \"\\\",\"" /tmp/lingua_translations.json | sed '$s/,$//' >> "public/locales/$lang/Header.json"
+            else
+                # Fallback
+                echo "  \"Welcome to our React Demo App\": \"Welcome to our React Demo App\"," >> "public/locales/$lang/Header.json"
+                echo "  \"English\": \"English\"," >> "public/locales/$lang/Header.json"
+                echo "  \"Spanish\": \"Spanish\"," >> "public/locales/$lang/Header.json"
+                echo "  \"French\": \"French\"" >> "public/locales/$lang/Header.json"
+            fi
+            echo "}" >> "public/locales/$lang/Header.json"
+            
+            # ProductList.json
+            echo "{" > "public/locales/$lang/ProductList.json"
+            if [ -f "/tmp/lingua_translations.json" ]; then
+                jq -r ".translations.\"$lang\"[] | select(.original | test(\"demo showcases|Get Started\")) | \"  \\\"\" + .original + \"\\\": \\\"\" + .translation + \"\\\",\"" /tmp/lingua_translations.json | sed '$s/,$//' >> "public/locales/$lang/ProductList.json"
+            else
+                echo "  \"This demo showcases Lingua's AI-powered translation capabilities.\": \"This demo showcases Lingua's AI-powered translation capabilities.\"," >> "public/locales/$lang/ProductList.json"
+                echo "  \"Get Started\": \"Get Started\"" >> "public/locales/$lang/ProductList.json"
+            fi
+            echo "}" >> "public/locales/$lang/ProductList.json"
+            
+            # Footer.json  
+            echo "{" > "public/locales/$lang/Footer.json"
+            if [ -f "/tmp/lingua_translations.json" ]; then
+                jq -r ".translations.\"$lang\"[] | select(.original | test(\"© 2024\")) | \"  \\\"\" + .original + \"\\\": \\\"\" + .translation + \"\\\"\"" /tmp/lingua_translations.json >> "public/locales/$lang/Footer.json"
+            else
+                echo "  \"© 2024 Demo Company\": \"© 2024 Demo Company\"" >> "public/locales/$lang/Footer.json"
+            fi
+            echo "}" >> "public/locales/$lang/Footer.json"
+            
+            # App.json
+            echo "{" > "public/locales/$lang/App.json"
+            if [ -f "/tmp/lingua_translations.json" ]; then
+                jq -r ".translations.\"$lang\"[] | select(.original | test(\"Loading\")) | \"  \\\"\" + .original + \"\\\": \\\"\" + .translation + \"\\\"\"" /tmp/lingua_translations.json >> "public/locales/$lang/App.json"
+            else
+                echo "  \"Loading translations...\": \"Loading translations...\"" >> "public/locales/$lang/App.json"
+            fi
+            echo "}" >> "public/locales/$lang/App.json"
+        done
+        
+        echo "✅ Generated React i18next-compatible JSON files"
+        echo "📄 Created $(find public/locales -name "*.json" 2>/dev/null | wc -l) translation files for languages: $LANGUAGES"
+        ;;
+    *)
+        cat << 'HELP'
+🌯 Lingua - AI-Powered Translation Build Tool (Demo)
+
+Commands:
+  setup     Download AI translation models (Facebook NLLB)
+  extract   Extract translatable strings from source code  
+  translate Generate concurrent AI translations
+  generate  Create framework-compatible output files
+
+Example workflow:
+  lingua setup
+  lingua extract --source-dir src --pattern-type i18n
+  lingua translate --to es,fr,de
+  lingua generate --output-template "public/locales/{lang}/{filename}.json"
+
+Features:
+  ⚡ Concurrent BEAM processing
+  🤖 Facebook NLLB AI translation
+  📁 Template-based output
+  🔄 1:1 file mapping preservation
+HELP
+        ;;
+esac
+EOF
+RUN chmod +x /usr/local/bin/lingua
+
+# Copy demo workflow script
+COPY demo-workflow.sh /app/demo-workflow.sh
+RUN chmod +x /app/demo-workflow.sh
+
+# Expose React dev server port  
+EXPOSE 3000
+
+# Run demo workflow
+CMD ["/app/demo-workflow.sh"]

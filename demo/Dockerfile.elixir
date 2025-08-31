@@ -1,0 +1,59 @@
+FROM hexpm/elixir:1.18.4-erlang-28.0.2-alpine-3.20.3 AS builder
+
+# Install build dependencies
+RUN apk add --no-cache \
+    build-base \
+    git \
+    curl \
+    bash
+
+# Set up Lingua source
+WORKDIR /lingua-source
+COPY ../mix.exs ../mix.lock ./
+COPY ../lib ./lib
+
+# Install dependencies and build release
+RUN mix local.hex --force && \
+    mix local.rebar --force && \
+    mix deps.get && \
+    MIX_ENV=prod mix release --overwrite
+
+# Create the final image with React app
+FROM node:18-alpine
+
+# Install system dependencies
+RUN apk add --no-cache \
+    curl \
+    bash \
+    tar \
+    gzip \
+    sudo
+
+# Create React app
+WORKDIR /app
+RUN npx create-react-app@latest demo-react-i18n --template typescript
+
+# Install i18n dependencies
+WORKDIR /app/demo-react-i18n
+RUN npm install react-i18next i18next i18next-browser-languagedetector --legacy-peer-deps
+
+# Copy demo source files
+COPY demo-src/ src/
+
+# Copy built Lingua release from builder stage
+COPY --from=builder /lingua-source/_build/prod/lingua-0.1.0.tar.gz /tmp/lingua-release.tar.gz
+
+# Copy and run install script
+COPY install.sh /tmp/install.sh
+RUN chmod +x /tmp/install.sh && \
+    LINGUA_RELEASE_FILE=/tmp/lingua-release.tar.gz /tmp/install.sh
+
+# Copy demo workflow
+COPY demo-workflow.sh /app/demo-workflow.sh
+RUN chmod +x /app/demo-workflow.sh
+
+# Expose React dev server port
+EXPOSE 3000
+
+# Run the demo workflow
+CMD ["/app/demo-workflow.sh"]

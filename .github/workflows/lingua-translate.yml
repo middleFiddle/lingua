@@ -1,0 +1,144 @@
+name: Lingua AI Translation Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      target_languages:
+        description: 'Target languages (comma-separated: es,fr,de,pt,ja)'
+        required: true
+        default: 'es,fr'
+      output_template:
+        description: 'Output template for generated files'
+        required: false
+        default: 'public/locales/{lang}/{filename}.json'
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Elixir
+      uses: erlef/setup-beam@v1
+      with:
+        elixir-version: '1.18.4'
+        otp-version: '28.0.2'
+        
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          deps
+          _build
+        key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-mix-
+          
+    - name: Install dependencies
+      run: mix deps.get
+      
+    - name: Build Lingua release
+      run: MIX_ENV=prod mix release --overwrite
+      
+    - name: Install Lingua CLI
+      run: |
+        sudo mkdir -p /usr/local/lingua
+        sudo tar -xzf _build/prod/lingua-0.1.0.tar.gz -C /usr/local/lingua --strip-components=1
+        
+        # Create CLI wrapper
+        sudo tee /usr/local/bin/lingua > /dev/null << 'EOF'
+        #!/bin/bash
+        LINGUA_HOME="/usr/local/lingua"
+        COMMAND="$1"
+        shift
+        case "$COMMAND" in
+            "extract"|"translate"|"generate"|"setup")
+                exec "$LINGUA_HOME/bin/lingua" eval "Lingua.CLI.main([\"$COMMAND\"] ++ System.argv())" -- "$@"
+                ;;
+            *)
+                exec "$LINGUA_HOME/bin/lingua" eval "Lingua.CLI.main([\"--help\"])"
+                ;;
+        esac
+        EOF
+        sudo chmod +x /usr/local/bin/lingua
+        
+    - name: Verify Lingua installation
+      run: lingua --version
+      
+    - name: Setup AI models
+      run: lingua setup
+      
+    - name: Extract translatable strings
+      run: |
+        if [ -d "src" ]; then
+          lingua extract --source-dir src --pattern-type i18n
+        else
+          echo "No src directory found, skipping extraction"
+        fi
+        
+    - name: Generate AI translations
+      run: |
+        TARGET_LANGS="${{ github.event.inputs.target_languages || 'es,fr' }}"
+        if [ -f "/tmp/lingua_strings.json" ]; then
+          lingua translate --to "$TARGET_LANGS"
+        else
+          echo "No extracted strings found, skipping translation"
+        fi
+        
+    - name: Generate output files
+      run: |
+        TEMPLATE="${{ github.event.inputs.output_template || 'translations/{lang}/{filename}.json' }}"
+        if [ -f "/tmp/lingua_translations.json" ]; then
+          lingua generate --output-template "$TEMPLATE" --format json
+        else
+          echo "No translations found, skipping generation"
+        fi
+        
+    - name: Upload translation artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: lingua-translations
+        path: |
+          translations/
+          public/locales/
+          /tmp/lingua_*.json
+        retention-days: 30
+        
+    - name: Create Pull Request with translations
+      if: github.event_name == 'workflow_dispatch'
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: |
+          feat: add AI-generated translations
+          
+          🤖 Generated with Lingua AI Translation Pipeline
+          
+          Languages: ${{ github.event.inputs.target_languages }}
+          Template: ${{ github.event.inputs.output_template }}
+        title: "🌍 AI Translation Update - ${{ github.event.inputs.target_languages }}"
+        body: |
+          ## 🤖 Lingua AI Translation Pipeline Results
+          
+          **Target Languages**: `${{ github.event.inputs.target_languages }}`
+          **Output Template**: `${{ github.event.inputs.output_template }}`
+          
+          ### What's Included:
+          - ✅ Concurrent AI-powered translations using Facebook NLLB
+          - ✅ 1:1 file mapping preserving source structure  
+          - ✅ Template-based output for framework integration
+          - ✅ BEAM concurrency for optimal performance
+          
+          ### Generated Files:
+          Check the `translations/` or `public/locales/` directories for the new translation files.
+          
+          **Powered by [Lingua](https://github.com/middleFiddle/lingua) 🚀**
+        branch: lingua-translations-${{ github.run_number }}
+        delete-branch: true

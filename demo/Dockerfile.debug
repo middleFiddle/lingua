@@ -1,0 +1,54 @@
+# Debug version - simplified for testing
+FROM node:18-alpine
+
+# Install system dependencies 
+RUN apk add --no-cache curl bash tar gzip sudo
+
+# Set working directory  
+WORKDIR /app
+
+# Copy and test Lingua installer manually
+COPY install.sh /tmp/install.sh
+COPY lingua-0.1.0.tar.gz /tmp/lingua-release.tar.gz
+
+# Debug: manually extract and check contents
+RUN chmod +x /tmp/install.sh && \
+    mkdir -p /usr/local/lingua && \
+    tar -xzf /tmp/lingua-release.tar.gz -C /usr/local/lingua --strip-components=1 && \
+    ls -la /usr/local/lingua/ && \
+    ls -la /usr/local/lingua/bin/ && \
+    file /usr/local/lingua/bin/lingua
+
+# Create the wrapper manually
+RUN cat > /usr/local/bin/lingua << 'EOF'
+#!/bin/bash
+LINGUA_HOME="/usr/local/lingua"
+COMMAND="$1"
+shift
+
+case "$COMMAND" in
+    "extract"|"translate"|"generate"|"setup")
+        exec "$LINGUA_HOME/bin/lingua" eval "Lingua.CLI.main([\"$COMMAND\"] ++ System.argv())" -- "$@"
+        ;;
+    "--help"|"-h"|"help")
+        exec "$LINGUA_HOME/bin/lingua" eval "Lingua.CLI.main([\"--help\"])"
+        ;;
+    "--version"|"-v"|"version")
+        exec "$LINGUA_HOME/bin/lingua" eval "Lingua.CLI.main([\"--version\"])"
+        ;;
+    "")
+        exec "$LINGUA_HOME/bin/lingua" eval "Lingua.CLI.main([])"
+        ;;
+    *)
+        echo "Unknown command: $COMMAND"
+        exec "$LINGUA_HOME/bin/lingua" eval "Lingua.CLI.main([\"--help\"])"
+        ;;
+esac
+EOF
+
+RUN chmod +x /usr/local/bin/lingua
+
+# Test if it works
+RUN lingua --version || echo "Failed to run lingua --version"
+
+CMD ["/bin/bash"]

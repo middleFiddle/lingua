@@ -1,0 +1,273 @@
+# Azure Pipelines - Lingua AI Translation Pipeline
+# Supports React/React Native projects with AI-powered concurrent translations
+
+trigger:
+- main
+- develop
+
+pr:
+- main
+
+parameters:
+- name: targetLanguages
+  displayName: 'Target Languages (comma-separated)'
+  type: string
+  default: 'es,fr'
+- name: outputTemplate
+  displayName: 'Output Template'
+  type: string
+  default: 'public/locales/{lang}/{filename}.json'
+
+variables:
+  elixirVersion: '1.18.4'
+  otpVersion: '28.0.2'
+
+stages:
+- stage: BuildAndTranslate
+  displayName: 'Build Lingua and Generate Translations'
+  jobs:
+  - job: BuildLingua
+    displayName: 'Build Lingua Release'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: UseNode@1
+      inputs:
+        version: '18.x'
+      displayName: 'Setup Node.js'
+
+    - script: |
+        # Install Elixir and Erlang
+        wget https://packages.erlang-solutions.com/erlang-solutions_2.0_all.deb
+        sudo dpkg -i erlang-solutions_2.0_all.deb
+        sudo apt-get update
+        sudo apt-get install -y elixir=$(elixirVersion) erlang-base=$(otpVersion)
+      displayName: 'Install Elixir and Erlang'
+
+    - script: |
+        mix local.hex --force
+        mix local.rebar --force
+        mix deps.get
+      displayName: 'Install Elixir dependencies'
+
+    - script: |
+        MIX_ENV=prod mix release --overwrite
+      displayName: 'Build Lingua release'
+
+    - script: |
+        # Install Lingua CLI
+        sudo mkdir -p /usr/local/lingua
+        sudo tar -xzf _build/prod/lingua-0.1.0.tar.gz -C /usr/local/lingua
+        
+        # Create CLI wrapper
+        sudo tee /usr/local/bin/lingua > /dev/null << 'EOF'
+        #!/bin/bash
+        LINGUA_HOME="/usr/local/lingua"
+        COMMAND="$1"
+        shift
+        case "$COMMAND" in
+            "extract"|"translate"|"generate"|"setup")
+                exec "$LINGUA_HOME/bin/lingua" eval "Lingua.CLI.main([\"$COMMAND\"] ++ System.argv())" -- "$@"
+                ;;
+            "--help"|"-h"|"help")
+                exec "$LINGUA_HOME/bin/lingua" eval "Lingua.CLI.main([\"--help\"])"
+                ;;
+            "--version"|"-v"|"version")
+                exec "$LINGUA_HOME/bin/lingua" eval "Lingua.CLI.main([\"--version\"])"
+                ;;
+            "")
+                exec "$LINGUA_HOME/bin/lingua" eval "Lingua.CLI.main([])"
+                ;;
+            *)
+                echo "Unknown command: $COMMAND"
+                exec "$LINGUA_HOME/bin/lingua" eval "Lingua.CLI.main([\"--help\"])"
+                ;;
+        esac
+        EOF
+        sudo chmod +x /usr/local/bin/lingua
+      displayName: 'Install Lingua CLI'
+
+    - script: |
+        lingua --version
+      displayName: 'Verify Lingua installation'
+
+    - script: |
+        lingua setup
+      displayName: 'Setup AI translation models'
+
+    - script: |
+        if [ -d "src" ]; then
+          echo "Extracting i18n strings from src directory..."
+          lingua extract --source-dir src --pattern-type i18n
+        else
+          echo "No src directory found, skipping extraction"
+        fi
+      displayName: 'Extract translatable strings'
+
+    - script: |
+        TARGET_LANGS="${{ parameters.targetLanguages }}"
+        if [ -f "/tmp/lingua_strings.json" ]; then
+          echo "Generating AI translations for languages: $TARGET_LANGS"
+          lingua translate --to "$TARGET_LANGS"
+        else
+          echo "No extracted strings found, skipping translation"
+        fi
+      displayName: 'Generate AI translations'
+
+    - script: |
+        TEMPLATE="${{ parameters.outputTemplate }}"
+        if [ -f "/tmp/lingua_translations.json" ]; then
+          echo "Generating output files with template: $TEMPLATE"
+          lingua generate --output-template "$TEMPLATE" --format json
+        else
+          echo "No translations found, skipping generation"
+        fi
+      displayName: 'Generate translation files'
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: 'public/locales'
+        artifactName: 'lingua-translations'
+        publishLocation: 'Container'
+      condition: succeededOrFailed()
+      displayName: 'Publish translation artifacts'
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: '/tmp'
+        artifactName: 'lingua-intermediate-files'
+        publishLocation: 'Container'
+      condition: succeededOrFailed()
+      displayName: 'Publish intermediate files'
+
+  - job: CreatePullRequest
+    displayName: 'Create Pull Request with Translations'
+    dependsOn: BuildLingua
+    condition: and(succeeded(), eq(variables['Build.Reason'], 'Manual'))
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'specific'
+        itemPattern: 'lingua-translations/**'
+        downloadPath: '$(System.ArtifactsDirectory)'
+      displayName: 'Download translation artifacts'
+
+    - script: |
+        # Copy translations to workspace
+        cp -r $(System.ArtifactsDirectory)/lingua-translations/* .
+      displayName: 'Copy translations to workspace'
+
+    - task: CreatePullRequest@0
+      inputs:
+        sourceBranch: 'lingua-translations-$(Build.BuildId)'
+        targetBranch: 'main'
+        title: '🌍 AI Translation Update - ${{ parameters.targetLanguages }}'
+        description: |
+          ## 🤖 Lingua AI Translation Pipeline Results
+          
+          **Target Languages**: `${{ parameters.targetLanguages }}`
+          **Output Template**: `${{ parameters.outputTemplate }}`
+          **Build ID**: $(Build.BuildId)
+          
+          ### What's Included:
+          - ✅ Concurrent AI-powered translations using Facebook NLLB
+          - ✅ 1:1 file mapping preserving source structure  
+          - ✅ Template-based output for framework integration
+          - ✅ BEAM concurrency for optimal performance
+          
+          ### Generated Files:
+          Check the translation directories for the new translation files.
+          
+          **Powered by [Lingua](https://github.com/middleFiddle/lingua) 🚀**
+        reviewers: 'your-username'
+        workItems: ''
+      displayName: 'Create Pull Request'
+
+- stage: MultiPlatformReleases
+  displayName: 'Multi-Platform Release Builds'
+  condition: startsWith(variables['Build.SourceBranch'], 'refs/tags/v')
+  jobs:
+  - job: BuildReleases
+    displayName: 'Build ${{ matrix.os }}-${{ matrix.arch }}'
+    strategy:
+      matrix:
+        linux_x64:
+          imageName: 'ubuntu-latest'
+          os: 'linux'
+          arch: 'x64'
+        macos_x64:
+          imageName: 'macos-13'
+          os: 'macos'
+          arch: 'x64'
+        macos_arm64:
+          imageName: 'macos-14'
+          os: 'macos'
+          arch: 'arm64'
+        windows_x64:
+          imageName: 'windows-latest'
+          os: 'windows'
+          arch: 'x64'
+    pool:
+      vmImage: $(imageName)
+
+    steps:
+    - task: UseNode@1
+      inputs:
+        version: '18.x'
+      displayName: 'Setup Node.js'
+
+    - script: |
+        # Install Elixir on Linux/macOS
+        if [[ "$AGENT_OS" == "Linux" ]]; then
+          wget https://packages.erlang-solutions.com/erlang-solutions_2.0_all.deb
+          sudo dpkg -i erlang-solutions_2.0_all.deb
+          sudo apt-get update
+          sudo apt-get install -y elixir erlang-base
+        elif [[ "$AGENT_OS" == "Darwin" ]]; then
+          brew install elixir
+        fi
+      condition: ne(variables['Agent.OS'], 'Windows_NT')
+      displayName: 'Install Elixir (Linux/macOS)'
+
+    - script: |
+        # Install Elixir on Windows
+        choco install elixir
+      condition: eq(variables['Agent.OS'], 'Windows_NT')
+      displayName: 'Install Elixir (Windows)'
+
+    - script: |
+        mix local.hex --force
+        mix local.rebar --force
+        mix deps.get
+        MIX_ENV=prod mix release --overwrite
+      displayName: 'Build Lingua release'
+
+    - script: |
+        # Create platform-specific archive
+        VERSION=$(echo $BUILD_SOURCEBRANCHNAME | sed 's/^v//')
+        ARCHIVE_NAME="lingua-$(os)-$(arch)-$VERSION.tar.gz"
+        cp "_build/prod/lingua-$VERSION.tar.gz" "$ARCHIVE_NAME"
+        echo "##vso[task.setvariable variable=archiveName]$ARCHIVE_NAME"
+      condition: ne(variables['Agent.OS'], 'Windows_NT')
+      displayName: 'Create platform archive (Linux/macOS)'
+
+    - script: |
+        # Create platform-specific archive (Windows)
+        for /f %%i in ('echo %BUILD_SOURCEBRANCHNAME:~1%') do set VERSION=%%i
+        set ARCHIVE_NAME=lingua-$(os)-$(arch)-%VERSION%.tar.gz
+        copy "_build\prod\lingua-%VERSION%.tar.gz" "%ARCHIVE_NAME%"
+        echo ##vso[task.setvariable variable=archiveName]%ARCHIVE_NAME%
+      condition: eq(variables['Agent.OS'], 'Windows_NT')
+      displayName: 'Create platform archive (Windows)'
+
+    - task: PublishBuildArtifacts@1
+      inputs:
+        pathToPublish: '$(archiveName)'
+        artifactName: 'lingua-$(os)-$(arch)'
+        publishLocation: 'Container'
+      displayName: 'Publish release artifact'
