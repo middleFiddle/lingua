@@ -1,0 +1,67 @@
+# The directory Mix will write compiled artifacts to.
+/_build/
+
+# If you run "mix test --cover", coverage assets end up here.
+/cover/
+
+# The directory Mix downloads your dependencies sources to.
+/deps/
+
+# Where third-party dependencies like ExDoc output generated docs.
+/doc/
+
+# If the VM crashes, it generates a dump, let's ignore it too.
+erl_crash.dump
+
+# Also ignore archive artifacts (built via "mix archive.build").
+*.ez
+
+# Ignore package tarball (built via "mix hex.build").
+lingua_core-*.tar
+
+# Temporary files, for example, from tests.
+/tmp/
+
+# Release artifacts
+/_build/
+*.tar.gz
+/rel/
+
+# ML Model cache directories
+/.lingua/
+/priv/models/
+
+# Test directories and temporary files
+/test_*/
+*_test_output/
+*_output/
+concurrent_translation_logs.txt
+
+# Elixir Language Server
+/.elixir_ls/
+/.elixir-tools/
+
+# Operating System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+
+# Documentation that shouldn't be in repo
+CLAUDE.md
+template_examples.md
+CHANGELOG.md
